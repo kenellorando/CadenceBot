@@ -124,7 +124,7 @@ function command(message) {
                 isPlaying[message.guild.id]=true;
                 voiceChannel.join().then(connection => {
                     log.notice("Joined. Beginning playback (channel bitrate="+voiceChannel.bitrate+").");
-                    const dispatch = connection.playArbitraryInput('http://cadenceradio.com:8000/cadence1', { 'bitrate': config.bitrate });
+                    const dispatch = connection.playArbitraryInput('http://stream.cadenceradio.com:8000/cadence1', { 'bitrate': config.bitrate });
                     dispatch.on("end", end=> {
                         log.warning("Stream ended. Playback was in server "+message.guild.name+", channel "+voiceChannel.name);
                         if (!isPlaying[message.guild.id]) return;
@@ -217,7 +217,7 @@ function command(message) {
     }
     else if (message.content===config.commands.nowplaying) {
         log.notice("Received nowplaying command.");
-        const url="http://cadenceradio.com:8000/now-playing.xsl";
+        const url="http://stream.cadenceradio.com:8000/now-playing.xsl";
         log.info("Issuing fetch request to "+url);
         fetch(url).then(response => {
             log.info("Received response.");
@@ -342,6 +342,7 @@ function command(message) {
                     var msg={};
                     msg.channel=message.channel;
                     msg.guild=message.guild;
+                    msg.author={tag: message.author.tag};
                     msg.reply=function(r) {
                         // Custom message for successful requests
                         if (r.includes("received") && !r.includes("Aria says")) {
@@ -415,9 +416,16 @@ function command(message) {
             return;
         }
 
+
         var data={
             path: lastSearchedSongs[message.channel.id][song].path
         };
+
+        // If support is enabled, set the tag to the user's Discord tag
+        if (config.enableRequestTags) {
+            data.tag=message.author.tag
+        }
+
         log.info("Making a request to "+url);
         log.debug("data.path="+data.path);
         request.post({url, form: data}, function(err, response, body) {
@@ -447,6 +455,28 @@ function command(message) {
             }
         });
     }
+    // If none of those, check custom commands
+    else {
+        log.debug("Checking custom commands.");
+        // equalTo check is easy
+        if (config.customCommands.equalTo.hasOwnProperty(message.content)) {
+            log.info("Command "+message.content+" matched an equalTo custom command.")
+            message.reply(config.customCommands.equalTo[message.content]);
+        }
+        else {
+            // startsWith is harder.
+            for (var i in Object.keys(config.customCommands.startsWith)) {
+                var key = Object.keys(config.customCommands.startsWith)[i];
+
+                if (message.content.startsWith(key)) {
+                    log.info("Command "+message.content+" matched startsWith custom command "+key);
+                    message.reply(config.customCommands.startsWith[key].replace(/[^%]%s/, ' '+message.content.substring(key.length)).replace("%%s", "%s"));
+                    return;
+                }
+            }
+            log.debug("Not a custom command.")
+        }
+    }
 }
 
 bot.on('message', message => {
@@ -471,7 +501,7 @@ function updatePresence() {
     }
 
     log.debug("Fetching nowplaying information...");
-    fetch('http://cadenceradio.com:8000/now-playing.xsl').then(response => {
+    fetch('http://stream.cadenceradio.com:8000/now-playing.xsl').then(response => {
         response.text().then(text => {
             log.debug("Received response:\n\n"+text+"\n\n");
             song=nowPlayingFormat(text);
